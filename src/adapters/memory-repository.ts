@@ -1,4 +1,4 @@
-import type { AuditEvent, Capability, ExecutionPlan, ExecutionResult, IdempotencyRecord, Policy, Run, Task, Workspace } from '../domain/models'
+import type { AuditEvent, Capability, ExecutionPlan, ExecutionResult, IdempotencyRecord, Incident, Policy, RecoveryRecord, Run, SafeStop, Task, TelemetryRecord, Workspace } from '../domain/models'
 import type { Repository } from '../ports/repository'
 
 const copy = <T>(value: T): T => structuredClone(value)
@@ -12,6 +12,10 @@ export class MemoryRepository implements Repository {
   private plans = new Map<string, ExecutionPlan>()
   private results = new Map<string, ExecutionResult>()
   private idempotency = new Map<string, IdempotencyRecord>()
+  private incidents = new Map<string, Incident>()
+  private safeStops = new Map<string, SafeStop>()
+  private recoveries = new Map<string, RecoveryRecord>()
+  private telemetryRecords = new Map<string, TelemetryRecord>()
   private events = new Map<string, AuditEvent>()
 
   async createWorkspace(value: Workspace) { if ([...this.workspaces.values()].some((item) => item.slug === value.slug)) throw new Error('UNIQUE constraint failed: workspaces.slug'); this.workspaces.set(value.id, copy(value)) }
@@ -52,6 +56,24 @@ export class MemoryRepository implements Repository {
   async createIdempotencyRecord(value: IdempotencyRecord) { if (this.idempotency.has(value.key)) return false; this.idempotency.set(value.key, copy(value)); return true }
   async getIdempotencyRecord(key: string) { return copy(this.idempotency.get(key) ?? null) }
   async saveIdempotencyRecord(value: IdempotencyRecord) { this.idempotency.set(value.key, copy(value)) }
+
+  async createIncident(value: Incident) { this.incidents.set(value.id, copy(value)) }
+  async getIncident(id: string) { return copy(this.incidents.get(id) ?? null) }
+  async listIncidents() { return copy([...this.incidents.values()]) }
+  async saveIncident(value: Incident) { this.incidents.set(value.id, copy(value)) }
+
+  async createSafeStop(value: SafeStop) { this.safeStops.set(value.id, copy(value)) }
+  async getSafeStop(id: string) { return copy(this.safeStops.get(id) ?? null) }
+  async listSafeStops() { return copy([...this.safeStops.values()]) }
+  async saveSafeStop(value: SafeStop) { this.safeStops.set(value.id, copy(value)) }
+
+  async createRecovery(value: RecoveryRecord) { this.recoveries.set(value.id, copy(value)) }
+  async getRecovery(id: string) { return copy(this.recoveries.get(id) ?? null) }
+  async listRecoveries() { return copy([...this.recoveries.values()]) }
+  async saveRecovery(value: RecoveryRecord) { this.recoveries.set(value.id, copy(value)) }
+
+  async createTelemetry(value: TelemetryRecord) { this.telemetryRecords.set(value.id, copy(value)) }
+  async listTelemetry() { return copy([...this.telemetryRecords.values()]) }
 
   async appendEvent(value: AuditEvent) { if (this.events.has(value.id)) throw new Error('Audit events are immutable'); this.events.set(value.id, copy(value)) }
   async getEvent(id: string) { return copy(this.events.get(id) ?? null) }

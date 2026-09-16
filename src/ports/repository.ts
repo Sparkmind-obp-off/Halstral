@@ -1,4 +1,4 @@
-import type { AuditEvent, Capability, ExecutionPlan, ExecutionResult, IdempotencyRecord, Policy, Run, Task, Workspace } from '../domain/models'
+import type { AuditEvent, Capability, ExecutionPlan, ExecutionResult, IdempotencyRecord, Incident, Policy, RecoveryRecord, Run, SafeStop, Task, TelemetryRecord, Workspace } from '../domain/models'
 
 export interface Repository {
   createWorkspace(value: Workspace): Promise<void>
@@ -39,6 +39,24 @@ export interface Repository {
   createIdempotencyRecord(value: IdempotencyRecord): Promise<boolean>
   getIdempotencyRecord(key: string): Promise<IdempotencyRecord | null>
   saveIdempotencyRecord(value: IdempotencyRecord): Promise<void>
+
+  createIncident(value: Incident): Promise<void>
+  getIncident(id: string): Promise<Incident | null>
+  listIncidents(): Promise<Incident[]>
+  saveIncident(value: Incident): Promise<void>
+
+  createSafeStop(value: SafeStop): Promise<void>
+  getSafeStop(id: string): Promise<SafeStop | null>
+  listSafeStops(): Promise<SafeStop[]>
+  saveSafeStop(value: SafeStop): Promise<void>
+
+  createRecovery(value: RecoveryRecord): Promise<void>
+  getRecovery(id: string): Promise<RecoveryRecord | null>
+  listRecoveries(): Promise<RecoveryRecord[]>
+  saveRecovery(value: RecoveryRecord): Promise<void>
+
+  createTelemetry(value: TelemetryRecord): Promise<void>
+  listTelemetry(): Promise<TelemetryRecord[]>
 
   appendEvent(value: AuditEvent): Promise<void>
   getEvent(id: string): Promise<AuditEvent | null>

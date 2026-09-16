@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import type { Actor } from '../domain/models'
+import { INCIDENT_STATUSES, SAFE_STOP_SCOPES, type Actor, type IncidentStatus, type SafeStopScope } from '../domain/models'
 import { DomainError } from '../domain/errors'
 import { ControlPlane } from '../application/control-plane'
 import { OrchestrationEngine } from '../application/orchestration-engine'
@@ -19,12 +19,28 @@ const body = async (c: { req: { json: () => Promise<unknown> } }) => {
 
 export function createApp(controlPlane: ControlPlane, controlToken: string, ownerId = 'owner_halstral', orchestration?: OrchestrationEngine) {
   const app = new Hono<{ Variables: { actor: Actor } }>()
-
-  app.get('/', (c) => c.json({ name: 'HALSTRAL', role: 'Private Business Orchestration Core', phase: orchestration ? 2 : 1, execution: orchestration ? 'governed-internal-adapters' : 'registry-only', arbitraryCodeExecution: false }))
-  app.get('/health', (c) => c.json({ status: 'ok' }))
+  const rateWindows = new Map<string, { count: number; expiresAt: number }>()
 
   app.use('*', async (c, next) => {
-    if (c.req.path === '/' || c.req.path === '/health') return next()
+    const ip = c.req.header('cf-connecting-ip') ?? 'local'
+    const current = Date.now(); const key = `${ip}:${Math.floor(current / 60_000)}`; const window = rateWindows.get(key) ?? { count: 0, expiresAt: current + 60_000 }
+    window.count += 1; rateWindows.set(key, window)
+    if (rateWindows.size > 1000) for (const [entry, value] of rateWindows) if (value.expiresAt < current) rateWindows.delete(entry)
+    if (window.count > 120) return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many requests' } }, 429)
+    await next()
+    c.res.headers.set('X-Content-Type-Options', 'nosniff')
+    c.res.headers.set('X-Frame-Options', 'DENY')
+    c.res.headers.set('Referrer-Policy', 'no-referrer')
+    c.res.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+    c.res.headers.set('Cache-Control', c.req.path === '/' || c.req.path === '/health' ? 'no-store' : 'private, no-store')
+  })
+
+  app.get('/', (c) => c.json({ name: 'HALSTRAL', role: 'Private Business Orchestration Core', phase: orchestration ? 3 : 1, execution: orchestration ? 'safe-observable-recoverable' : 'registry-only', arbitraryCodeExecution: false }))
+  app.get('/health', (c) => c.json({ status: 'ok', phase: 3 }))
+  app.get('/api/health', (c) => c.json({ status: 'ok', phase: 3 }))
+
+  app.use('*', async (c, next) => {
+    if (c.req.path === '/' || c.req.path === '/health' || c.req.path === '/api/health') return next()
     const bearer = c.req.header('authorization')?.replace(/^Bearer\s+/i, '') ?? ''
     if (!controlToken || !await equalSecret(bearer, controlToken)) return c.json({ error: { code: 'UNAUTHENTICATED', message: 'Valid control-plane bearer token required' } }, 401)
     const type = c.req.header('x-actor-type') === 'WORKSPACE' ? 'WORKSPACE' : 'OWNER'
@@ -73,10 +89,42 @@ export function createApp(controlPlane: ControlPlane, controlToken: string, owne
   app.get('/results', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Orchestration is unavailable', 501); return c.json(await orchestration.listResults(c.get('actor'))) })
   app.get('/results/:id', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Orchestration is unavailable', 501); return c.json(await orchestration.getResult(c.req.param('id'), c.get('actor'))) })
 
+  app.get('/operations/overview', async (c) => {
+    if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Safety controls are unavailable', 501)
+    const actor = c.get('actor'); const safety = orchestration.getSafetyController()
+    const [runs, incidents, safeStops, recoveries, telemetry] = await Promise.all([controlPlane.listRuns(actor), safety.listIncidents(actor), safety.listSafeStops(actor), safety.listRecoveries(actor), safety.listTelemetry(actor)])
+    return c.json({
+      activeRuns: runs.filter((run) => ['DISPATCHED', 'RUNNING'].includes(run.status)),
+      retryingRuns: runs.filter((run) => run.status === 'RETRYING'),
+      blockedOrTimedOutRuns: runs.filter((run) => run.status === 'BLOCKED' || run.error?.toLowerCase().includes('timeout')),
+      incidents, safeStops: safeStops.filter((stop) => stop.active), recoveries,
+      health: { core: safeStops.some((stop) => stop.active && stop.scope === 'CORE') ? 'STOPPED' : 'AVAILABLE', openIncidents: incidents.filter((incident) => !['RESOLVED', 'CLOSED'].includes(incident.status)).length, telemetryRecords: telemetry.length },
+    })
+  })
+  app.get('/incidents', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Safety controls are unavailable', 501); return c.json(await orchestration.getSafetyController().listIncidents(c.get('actor'))) })
+  app.post('/incidents/:id/resolve', async (c) => {
+    if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Safety controls are unavailable', 501)
+    const input = await body(c); const status = String(input.status ?? 'RESOLVED') as IncidentStatus
+    if (!INCIDENT_STATUSES.includes(status)) throw new DomainError('VALIDATION_ERROR', 'Invalid incident status', 422)
+    return c.json(await orchestration.getSafetyController().resolveIncident(c.req.param('id'), c.get('actor'), status))
+  })
+  app.get('/safe-stops', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Safety controls are unavailable', 501); return c.json(await orchestration.getSafetyController().listSafeStops(c.get('actor'))) })
+  app.post('/safe-stops', async (c) => {
+    if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Safety controls are unavailable', 501)
+    const actor = c.get('actor'); if (actor.type !== 'OWNER' || actor.id !== ownerId) throw new DomainError('FORBIDDEN', 'Only the owner may trigger safe-stop', 403)
+    const input = await body(c); const scope = String(input.scope ?? '') as SafeStopScope
+    if (!SAFE_STOP_SCOPES.includes(scope)) throw new DomainError('VALIDATION_ERROR', 'Invalid safe-stop scope', 422)
+    return c.json(await orchestration.getSafetyController().triggerSafeStop(scope, String(input.scopeId ?? ''), input.workspaceId ? String(input.workspaceId) : null, String(input.reason ?? ''), actor), 201)
+  })
+  app.post('/safe-stops/:id/release', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Safety controls are unavailable', 501); return c.json(await orchestration.getSafetyController().releaseSafeStop(c.req.param('id'), c.get('actor'))) })
+  app.get('/recoveries', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Safety controls are unavailable', 501); return c.json(await orchestration.getSafetyController().listRecoveries(c.get('actor'))) })
+  app.get('/telemetry', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Safety controls are unavailable', 501); return c.json(await orchestration.getSafetyController().listTelemetry(c.get('actor'))) })
+
   app.get('/runs', async (c) => c.json(await controlPlane.listRuns(c.get('actor'))))
   app.post('/runs', async (c) => c.json(await controlPlane.createRun(await body(c), c.get('actor')), 201))
   app.get('/runs/:id', async (c) => c.json(await controlPlane.getRun(c.req.param('id'), c.get('actor'))))
   app.patch('/runs/:id', async (c) => { const input = await body(c); return c.json(await controlPlane.updateRun(c.req.param('id'), input.status, c.get('actor'), input.error)) })
+  app.post('/runs/:id/recover', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Recovery is unavailable', 501); return c.json(await orchestration.recoverRun(c.req.param('id'), c.get('actor'))) })
 
   app.get('/events', async (c) => c.json(await controlPlane.listEvents(c.get('actor'))))
   app.get('/events/:id', async (c) => c.json(await controlPlane.getEvent(c.req.param('id'), c.get('actor'))))

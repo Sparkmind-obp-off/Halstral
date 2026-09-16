@@ -1,4 +1,4 @@
-import type { AuditEvent, Capability, ExecutionPlan, ExecutionResult, IdempotencyRecord, Policy, Run, Task, Workspace } from '../domain/models'
+import type { AuditEvent, Capability, ExecutionPlan, ExecutionResult, IdempotencyRecord, Incident, Policy, RecoveryRecord, Run, SafeStop, Task, TelemetryRecord, Workspace } from '../domain/models'
 import type { Repository } from '../ports/repository'
 
 type Row = Record<string, unknown>
@@ -14,6 +14,10 @@ const plan = (r: Row): ExecutionPlan => ({ id: String(r.id), taskId: String(r.ta
 const result = (r: Row): ExecutionResult => ({ id: String(r.id), taskId: String(r.task_id), runId: String(r.run_id), workspaceId: String(r.workspace_id), stepId: String(r.step_id), status: r.status as ExecutionResult['status'], output: r.output ? parse(r.output) : null, errorCode: r.error_code ? String(r.error_code) : null, errorMessage: r.error_message ? String(r.error_message) : null, createdAt: String(r.created_at) })
 const idempotency = (r: Row): IdempotencyRecord => ({ key: String(r.key), workspaceId: String(r.workspace_id), capabilityId: String(r.capability_id), status: r.status as IdempotencyRecord['status'], resultId: r.result_id ? String(r.result_id) : null, createdAt: String(r.created_at), updatedAt: String(r.updated_at) })
 const event = (r: Row): AuditEvent => ({ id: String(r.id), type: r.type as AuditEvent['type'], actor: parse(r.actor), workspaceId: r.workspace_id ? String(r.workspace_id) : null, resourceType: String(r.resource_type), resourceId: String(r.resource_id), timestamp: String(r.timestamp), metadata: parse(r.metadata) })
+const incident = (r: Row): Incident => ({ id: String(r.id), severity: r.severity as Incident['severity'], workspaceId: String(r.workspace_id), taskId: r.task_id ? String(r.task_id) : null, runId: r.run_id ? String(r.run_id) : null, category: r.category as Incident['category'], summary: String(r.summary), status: r.status as Incident['status'], detectedAt: String(r.detected_at), resolvedAt: r.resolved_at ? String(r.resolved_at) : null, metadata: parse(r.metadata) })
+const safeStop = (r: Row): SafeStop => ({ id: String(r.id), scope: r.scope as SafeStop['scope'], scopeId: String(r.scope_id), workspaceId: r.workspace_id ? String(r.workspace_id) : null, reason: String(r.reason), active: Boolean(r.active), triggeredBy: parse(r.triggered_by), triggeredAt: String(r.triggered_at), releasedBy: r.released_by ? parse(r.released_by) : null, releasedAt: r.released_at ? String(r.released_at) : null })
+const recovery = (r: Row): RecoveryRecord => ({ id: String(r.id), workspaceId: String(r.workspace_id), taskId: String(r.task_id), runId: String(r.run_id), outcome: r.outcome as RecoveryRecord['outcome'], status: r.status as RecoveryRecord['status'], strategy: r.strategy as RecoveryRecord['strategy'], createdAt: String(r.created_at), completedAt: r.completed_at ? String(r.completed_at) : null, metadata: parse(r.metadata) })
+const telemetry = (r: Row): TelemetryRecord => ({ id: String(r.id), correlationId: String(r.correlation_id), taskId: r.task_id ? String(r.task_id) : null, runId: r.run_id ? String(r.run_id) : null, workspaceId: r.workspace_id ? String(r.workspace_id) : null, capabilityId: r.capability_id ? String(r.capability_id) : null, actor: parse(r.actor), timestamp: String(r.timestamp), durationMs: r.duration_ms === null ? null : Number(r.duration_ms), status: String(r.status), errorClass: r.error_class ? r.error_class as TelemetryRecord['errorClass'] : null, retryCount: Number(r.retry_count), policyOutcome: r.policy_outcome as TelemetryRecord['policyOutcome'], metadata: parse(r.metadata) })
 
 export class D1Repository implements Repository {
   constructor(private readonly db: D1Database) {}
@@ -22,44 +26,62 @@ export class D1Repository implements Repository {
 
   async createWorkspace(v: Workspace) { await this.db.prepare('INSERT INTO workspaces (id,slug,name,description,status,owner_id,environment,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(v.id,v.slug,v.name,v.description,v.status,v.ownerId,v.environment,v.createdAt,v.updatedAt).run() }
   getWorkspace(id: string) { return this.one('SELECT * FROM workspaces WHERE id=?', id, workspace) }
-  listWorkspaces() { return this.many('SELECT * FROM workspaces ORDER BY created_at', workspace) }
+  listWorkspaces() { return this.many('SELECT * FROM workspaces ORDER BY created_at LIMIT 500', workspace) }
   async saveWorkspace(v: Workspace) { await this.db.prepare('UPDATE workspaces SET slug=?,name=?,description=?,status=?,environment=?,updated_at=? WHERE id=?').bind(v.slug,v.name,v.description,v.status,v.environment,v.updatedAt,v.id).run() }
 
   async createCapability(v: Capability) { await this.db.prepare('INSERT INTO capabilities (id,name,description,owner_scope,workspace_id,risk_level,input_schema,output_schema,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').bind(v.id,v.name,v.description,v.ownerScope,v.workspaceId,v.riskLevel,json(v.inputSchema),json(v.outputSchema),v.status,v.createdAt,v.updatedAt).run() }
   getCapability(id: string) { return this.one('SELECT * FROM capabilities WHERE id=?', id, capability) }
-  listCapabilities() { return this.many('SELECT * FROM capabilities ORDER BY created_at', capability) }
+  listCapabilities() { return this.many('SELECT * FROM capabilities ORDER BY created_at LIMIT 500', capability) }
   async saveCapability(v: Capability) { await this.db.prepare('UPDATE capabilities SET name=?,description=?,risk_level=?,input_schema=?,output_schema=?,status=?,updated_at=? WHERE id=?').bind(v.name,v.description,v.riskLevel,json(v.inputSchema),json(v.outputSchema),v.status,v.updatedAt,v.id).run() }
 
   async createPolicy(v: Policy) { await this.db.prepare('INSERT INTO policies (id,name,workspace_id,subject,resource,action,scope,effect,approval_required,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').bind(v.id,v.name,v.workspaceId,v.subject,v.resource,v.action,v.scope,v.effect,v.approvalRequired ? 1 : 0,v.status,v.createdAt,v.updatedAt).run() }
   getPolicy(id: string) { return this.one('SELECT * FROM policies WHERE id=?', id, policy) }
-  listPolicies() { return this.many('SELECT * FROM policies ORDER BY created_at', policy) }
+  listPolicies() { return this.many('SELECT * FROM policies ORDER BY created_at LIMIT 500', policy) }
   async savePolicy(v: Policy) { await this.db.prepare('UPDATE policies SET name=?,subject=?,resource=?,action=?,scope=?,effect=?,approval_required=?,status=?,updated_at=? WHERE id=?').bind(v.name,v.subject,v.resource,v.action,v.scope,v.effect,v.approvalRequired ? 1 : 0,v.status,v.updatedAt,v.id).run() }
 
   async createTask(v: Task) { await this.db.prepare('INSERT INTO tasks (id,workspace_id,title,description,status,capability_id,credential_ref,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(v.id,v.workspaceId,v.title,v.description,v.status,v.capabilityId,v.credentialRef,v.createdAt,v.updatedAt).run() }
   getTask(id: string) { return this.one('SELECT * FROM tasks WHERE id=?', id, task) }
-  listTasks() { return this.many('SELECT * FROM tasks ORDER BY created_at', task) }
+  listTasks() { return this.many('SELECT * FROM tasks ORDER BY created_at LIMIT 500', task) }
   async saveTask(v: Task) { await this.db.prepare('UPDATE tasks SET title=?,description=?,status=?,capability_id=?,credential_ref=?,updated_at=? WHERE id=?').bind(v.title,v.description,v.status,v.capabilityId,v.credentialRef,v.updatedAt,v.id).run() }
 
   async createRun(v: Run) { await this.db.prepare('INSERT INTO runs (id,task_id,workspace_id,status,attempt,idempotency_key,started_at,completed_at,error,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').bind(v.id,v.taskId,v.workspaceId,v.status,v.attempt,v.idempotencyKey,v.startedAt,v.completedAt,v.error,v.createdAt,v.updatedAt).run() }
   getRun(id: string) { return this.one('SELECT * FROM runs WHERE id=?', id, run) }
-  listRuns() { return this.many('SELECT * FROM runs ORDER BY created_at', run) }
+  listRuns() { return this.many('SELECT * FROM runs ORDER BY created_at LIMIT 500', run) }
   async saveRun(v: Run) { await this.db.prepare('UPDATE runs SET status=?,attempt=?,idempotency_key=?,started_at=?,completed_at=?,error=?,updated_at=? WHERE id=?').bind(v.status,v.attempt,v.idempotencyKey,v.startedAt,v.completedAt,v.error,v.updatedAt,v.id).run() }
 
   async createPlan(v: ExecutionPlan) { await this.db.prepare('INSERT INTO execution_plans (id,task_id,workspace_id,steps,status,overall_timeout_seconds,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(v.id,v.taskId,v.workspaceId,json(v.steps),v.status,v.overallTimeoutSeconds,v.createdAt,v.updatedAt).run() }
   getPlan(id: string) { return this.one('SELECT * FROM execution_plans WHERE id=?', id, plan) }
   async getPlanByTask(taskId: string) { const row = await this.db.prepare('SELECT * FROM execution_plans WHERE task_id=? ORDER BY created_at DESC LIMIT 1').bind(taskId).first<Row>(); return row ? plan(row) : null }
-  listPlans() { return this.many('SELECT * FROM execution_plans ORDER BY created_at', plan) }
+  listPlans() { return this.many('SELECT * FROM execution_plans ORDER BY created_at LIMIT 500', plan) }
   async savePlan(v: ExecutionPlan) { await this.db.prepare('UPDATE execution_plans SET steps=?,status=?,overall_timeout_seconds=?,updated_at=? WHERE id=?').bind(json(v.steps),v.status,v.overallTimeoutSeconds,v.updatedAt,v.id).run() }
 
   async createResult(v: ExecutionResult) { await this.db.prepare('INSERT INTO execution_results (id,task_id,run_id,workspace_id,step_id,status,output,error_code,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').bind(v.id,v.taskId,v.runId,v.workspaceId,v.stepId,v.status,v.output ? json(v.output) : null,v.errorCode,v.errorMessage,v.createdAt).run() }
   getResult(id: string) { return this.one('SELECT * FROM execution_results WHERE id=?', id, result) }
-  listResults() { return this.many('SELECT * FROM execution_results ORDER BY created_at', result) }
+  listResults() { return this.many('SELECT * FROM execution_results ORDER BY created_at LIMIT 500', result) }
 
   async createIdempotencyRecord(v: IdempotencyRecord) { const found = await this.getIdempotencyRecord(v.key); if (found) return false; await this.db.prepare('INSERT INTO idempotency_records (key,workspace_id,capability_id,status,result_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').bind(v.key,v.workspaceId,v.capabilityId,v.status,v.resultId,v.createdAt,v.updatedAt).run(); return true }
   getIdempotencyRecord(key: string) { return this.one('SELECT * FROM idempotency_records WHERE key=?', key, idempotency) }
   async saveIdempotencyRecord(v: IdempotencyRecord) { await this.db.prepare('UPDATE idempotency_records SET status=?,result_id=?,updated_at=? WHERE key=?').bind(v.status,v.resultId,v.updatedAt,v.key).run() }
 
+  async createIncident(v: Incident) { await this.db.prepare('INSERT INTO incidents (id,severity,workspace_id,task_id,run_id,category,summary,status,detected_at,resolved_at,metadata) VALUES (?,?,?,?,?,?,?,?,?,?,?)').bind(v.id,v.severity,v.workspaceId,v.taskId,v.runId,v.category,v.summary,v.status,v.detectedAt,v.resolvedAt,json(v.metadata)).run() }
+  getIncident(id: string) { return this.one('SELECT * FROM incidents WHERE id=?', id, incident) }
+  listIncidents() { return this.many('SELECT * FROM incidents ORDER BY detected_at DESC LIMIT 500', incident) }
+  async saveIncident(v: Incident) { await this.db.prepare('UPDATE incidents SET severity=?,category=?,summary=?,status=?,resolved_at=?,metadata=? WHERE id=?').bind(v.severity,v.category,v.summary,v.status,v.resolvedAt,json(v.metadata),v.id).run() }
+
+  async createSafeStop(v: SafeStop) { await this.db.prepare('INSERT INTO safe_stops (id,scope,scope_id,workspace_id,reason,active,triggered_by,triggered_at,released_by,released_at) VALUES (?,?,?,?,?,?,?,?,?,?)').bind(v.id,v.scope,v.scopeId,v.workspaceId,v.reason,v.active ? 1 : 0,json(v.triggeredBy),v.triggeredAt,v.releasedBy ? json(v.releasedBy) : null,v.releasedAt).run() }
+  getSafeStop(id: string) { return this.one('SELECT * FROM safe_stops WHERE id=?', id, safeStop) }
+  listSafeStops() { return this.many('SELECT * FROM safe_stops ORDER BY triggered_at DESC LIMIT 500', safeStop) }
+  async saveSafeStop(v: SafeStop) { await this.db.prepare('UPDATE safe_stops SET reason=?,active=?,released_by=?,released_at=? WHERE id=?').bind(v.reason,v.active ? 1 : 0,v.releasedBy ? json(v.releasedBy) : null,v.releasedAt,v.id).run() }
+
+  async createRecovery(v: RecoveryRecord) { await this.db.prepare('INSERT INTO recovery_records (id,workspace_id,task_id,run_id,outcome,status,strategy,created_at,completed_at,metadata) VALUES (?,?,?,?,?,?,?,?,?,?)').bind(v.id,v.workspaceId,v.taskId,v.runId,v.outcome,v.status,v.strategy,v.createdAt,v.completedAt,json(v.metadata)).run() }
+  getRecovery(id: string) { return this.one('SELECT * FROM recovery_records WHERE id=?', id, recovery) }
+  listRecoveries() { return this.many('SELECT * FROM recovery_records ORDER BY created_at DESC LIMIT 500', recovery) }
+  async saveRecovery(v: RecoveryRecord) { await this.db.prepare('UPDATE recovery_records SET outcome=?,status=?,strategy=?,completed_at=?,metadata=? WHERE id=?').bind(v.outcome,v.status,v.strategy,v.completedAt,json(v.metadata),v.id).run() }
+
+  async createTelemetry(v: TelemetryRecord) { await this.db.prepare('INSERT INTO telemetry (id,correlation_id,task_id,run_id,workspace_id,capability_id,actor,timestamp,duration_ms,status,error_class,retry_count,policy_outcome,metadata) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(v.id,v.correlationId,v.taskId,v.runId,v.workspaceId,v.capabilityId,json(v.actor),v.timestamp,v.durationMs,v.status,v.errorClass,v.retryCount,v.policyOutcome,json(v.metadata)).run() }
+  listTelemetry() { return this.many('SELECT * FROM telemetry ORDER BY timestamp DESC LIMIT 500', telemetry) }
+
   async appendEvent(v: AuditEvent) { await this.db.prepare('INSERT INTO events (id,type,actor,workspace_id,resource_type,resource_id,timestamp,metadata) VALUES (?,?,?,?,?,?,?,?)').bind(v.id,v.type,json(v.actor),v.workspaceId,v.resourceType,v.resourceId,v.timestamp,json(v.metadata)).run() }
   getEvent(id: string) { return this.one('SELECT * FROM events WHERE id=?', id, event) }
-  listEvents() { return this.many('SELECT * FROM events ORDER BY timestamp', event) }
+  listEvents() { return this.many('SELECT * FROM events ORDER BY timestamp DESC LIMIT 500', event) }
 }

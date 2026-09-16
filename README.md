@@ -2,101 +2,108 @@
 
 **Private Business Orchestration Core**
 
-HALSTRAL is an owner-controlled control plane for governing and coordinating bounded work across independent business workspaces without collapsing their data, credentials, or authority into a shared monolith.
+HALSTRAL is an owner-controlled control plane for governing bounded work across isolated business workspaces.
 
-> One Owner. One Orchestration Core. Many Independent Businesses. Separate Workspaces.
+> Execute safely, observe clearly, fail predictably, recover deliberately.
 
-## Phase 2 status
+## Phase 3 status
 
-Phase 2 — Task Orchestration & Execution Coordination is implemented. HALSTRAL now supports:
+Phase 3 — Safety, Observability & Recovery is implemented on top of the Phase 0–2 control plane:
 
-- task intake, classification, workspace resolution, and risk classification;
-- active/registered/authorized capability selection with ownership checks;
-- bounded, inspectable execution plans with dependencies, output expectations, approval, timeout, and retry controls;
-- centralized default-deny policy evaluation at selection and immediately before execution;
-- a capability adapter boundary with a safe internal adapter and no arbitrary code execution;
-- task, plan, step, and run lifecycle management with rejected invalid transitions;
-- HIGH/CRITICAL approval gates and explicit owner approval references;
-- bounded retries for allow-listed transient failures only;
-- per-step and overall task timeouts, cancellation, and failure classification;
-- idempotency records that prevent duplicate side effects on repeated execution;
-- workspace-bound result validation and persistence;
-- append-only, secret-safe lifecycle audit events;
-- 44 automated tests: 19 Phase 1 regression tests and 25 Phase 2 tests.
+- deterministic failure classes: `TRANSIENT`, `VALIDATION`, `AUTHORIZATION`, `CREDENTIAL`, `EXTERNAL_SERVICE`, `TIMEOUT`, `CANCELLED`, `SYSTEM`, `UNKNOWN`, and `CRITICAL`;
+- bounded retries with validated attempts/backoff/timeouts and policy re-evaluation before every attempt;
+- explicit cooperative cancellation through `AbortSignal` at adapter boundaries;
+- per-step and overall execution timeout enforcement;
+- replay protection through workspace/task/capability/step idempotency keys;
+- conservative handling of unknown side-effect outcomes through safe-stop, incident creation, and manual review;
+- concurrency limits at core, workspace, capability, and task scope;
+- safe-stop at step, run, task, capability, workspace, and core scope, with owner-only audited release;
+- structured secret-safe telemetry with correlation, task, run, workspace, capability, actor, duration, status, error class, retries, and policy outcome;
+- auditable incident and recovery records;
+- owner operations API for active/retrying/blocked runs, incidents, safe-stops, recoveries, and health;
+- security headers, authenticated private routes, bounded request rate limiting, parameterized D1 statements, and non-leaking error responses;
+- 54 automated normal and adversarial tests, including all 44 Phase 1–2 regression tests.
+
+No unrestricted agents, arbitrary code execution, cross-workspace pooling, financial automation, or autonomous replay of unknown side effects were introduced.
 
 ## Stack
 
-- TypeScript
-- Hono
+- TypeScript + Hono
 - Cloudflare Pages/Workers
-- Cloudflare D1 (SQLite)
-- Vite
-- Vitest
-
-Architecture and operations: [`docs/10_PHASE_2_IMPLEMENTATION_GUIDE.md`](./docs/10_PHASE_2_IMPLEMENTATION_GUIDE.md).
-Acceptance evidence: [`docs/11_PHASE_2_ACCEPTANCE_EVIDENCE.md`](./docs/11_PHASE_2_ACCEPTANCE_EVIDENCE.md).
+- Cloudflare D1
+- Vite + Vitest
 
 ## Quick start
 
 ```bash
 npm install
 cp .env.example .dev.vars
-# Add a strong CONTROL_PLANE_TOKEN to .dev.vars
+# Add CONTROL_PLANE_TOKEN=<strong-private-token> to .dev.vars
 npm run db:migrate:local
-npx wrangler d1 execute halstral-production --local --file=./seed.sql
 npm run build
 pm2 start ecosystem.config.cjs
-curl http://localhost:3000/health
+curl http://localhost:3000/api/health
 ```
 
 `.dev.vars`, `.env*`, build output, local D1 state, logs, and archives are excluded from Git.
 
 ## Environment variables
 
-- `CONTROL_PLANE_TOKEN` — required private API bearer token; provision as a Cloudflare Pages secret.
-- `OWNER_ID` — optional owner identifier, default `owner_halstral`.
+- `CONTROL_PLANE_TOKEN` — required private API bearer token; provision in production with Cloudflare Pages secrets.
+- `OWNER_ID` — optional owner identifier; defaults to `owner_halstral`.
 
-Credential values are never domain data. Tasks may carry only scoped references shaped as `secret://workspace/<slug>/<credential>`.
+Credential values are never domain data. Tasks may carry only references shaped as `secret://workspace/<slug>/<credential>`.
 
 ## API entry URIs
 
-Public:
+Public, non-sensitive:
 
-- `GET /`
+- `GET /` — service identity and active phase
 - `GET /health`
+- `GET /api/health`
 
-Protected registry routes:
+All other routes require:
 
-- Workspaces: `/workspaces`, `/workspaces/:id`, `/workspaces/:id/suspend`, `/workspaces/:id/archive`
-- Capabilities: `/capabilities`, `/capabilities/:id`, `/capabilities/:id/disable`
-- Policies: `/policies`, `/policies/:id`
-- Tasks: `/tasks`, `/tasks/:id`, `/tasks/:id/cancel`
-- Runs: `/runs`, `/runs/:id`
-- Audit: `/events`, `/events/:id`
-
-Protected orchestration routes:
-
-- `POST /tasks/:id/classify` — classify an accepted task
-- `POST /tasks/:id/plans` — create a bounded execution plan
-- `GET /plans` / `GET /plans/:id` — inspect plans
-- `POST /plans/:id/approval` — submit `{ "decision": "GRANTED|DENIED", "approvalRef": "..." }`
-- `POST /plans/:id/execute` — run an approved plan through controlled adapters
-- `GET /results` / `GET /results/:id` — inspect workspace-bound results
-
-All protected routes require `Authorization: Bearer <token>` and accept `X-Actor-Type`/`X-Actor-Id` for auditable owner-controlled delegation context.
-
-## Execution model
-
-```text
-PENDING → CLASSIFIED → PLANNED → AUTHORIZED → DISPATCHED → RUNNING
-                                                            ├─ COMPLETED
-                                                            ├─ RETRYING
-                                                            ├─ FAILED
-                                                            ├─ BLOCKED
-                                                            └─ CANCELLED
+```http
+Authorization: Bearer <CONTROL_PLANE_TOKEN>
+X-Actor-Type: OWNER | WORKSPACE
+X-Actor-Id: <audited actor id>
 ```
 
-A policy denial becomes `BLOCKED` and is never automatically retried. HIGH and CRITICAL capabilities require explicit owner approval. Unknown adapters and unsafe retry/idempotency combinations fail closed.
+Registry and orchestration:
+
+- Workspaces: `GET|POST /workspaces`, `GET|PATCH /workspaces/:id`, `POST /workspaces/:id/suspend`, `POST /workspaces/:id/archive`
+- Capabilities: `GET|POST /capabilities`, `GET|PATCH /capabilities/:id`, `POST /capabilities/:id/disable`
+- Policies: `GET|POST /policies`, `GET|PATCH /policies/:id`
+- Tasks: `GET|POST /tasks`, `GET|PATCH /tasks/:id`, `POST /tasks/:id/classify`, `POST /tasks/:id/plans`, `POST /tasks/:id/cancel`
+- Plans: `GET /plans`, `GET /plans/:id`, `POST /plans/:id/approval`, `POST /plans/:id/execute`
+- Results: `GET /results`, `GET /results/:id`
+- Runs: `GET|POST /runs`, `GET|PATCH /runs/:id`, `POST /runs/:id/recover`
+- Audit: `GET /events`, `GET /events/:id`
+
+Owner safety controls:
+
+- `GET /operations/overview` — active/retrying/blocked runs and aggregate health
+- `GET /incidents`
+- `POST /incidents/:id/resolve` with `{ "status": "MITIGATED|RESOLVED|CLOSED" }`
+- `GET /safe-stops`
+- `POST /safe-stops` with `{ "scope", "scopeId", "workspaceId?", "reason" }`
+- `POST /safe-stops/:id/release`
+- `GET /recoveries`
+- `GET /telemetry`
+
+## Execution and recovery model
+
+```text
+TASK → PLAN → POLICY GATE → EXECUTION → OBSERVE
+                              ├→ SUCCESS → COMPLETE
+                              ├→ TRANSIENT FAILURE → BOUNDED RETRY
+                              ├→ TIMEOUT → CANCEL + INCIDENT/SAFE-STOP
+                              ├→ POLICY/CREDENTIAL FAILURE → BLOCK
+                              └→ CRITICAL/UNKNOWN → SAFE-STOP + INCIDENT
+```
+
+Every retry re-checks workspace state, capability state, safe-stop state, approval, and authorization. Retry exhaustion is terminal. A completed idempotent result is returned without repeating the side effect. An `IN_PROGRESS`/`UNKNOWN` replay is blocked for manual review.
 
 ## Data architecture
 
@@ -104,10 +111,9 @@ D1 tables:
 
 - Phase 1: `users`, `workspaces`, `capabilities`, `policies`, `tasks`, `runs`, `events`
 - Phase 2: `execution_plans`, `execution_results`, `idempotency_records`
+- Phase 3: `incidents`, `safe_stops`, `recovery_records`, `telemetry`
 
-Every task, plan, run, result, and idempotency record has explicit workspace context. Audit events are append-only through the repository port and protected by D1 update/delete triggers.
-
-Migrations:
+Migration `0003_phase_3_safety_observability_recovery.sql` also upgrades idempotency records to support the conservative `UNKNOWN` state. Operational indexes cover workspace, run, timestamp, incident status, and active safe-stop queries. Repository list queries are bounded.
 
 ```bash
 npm run db:migrate:local
@@ -116,13 +122,14 @@ npm run db:migrate:prod
 
 ## User guide
 
-1. Create an ACTIVE workspace.
-2. Register an ACTIVE capability whose name maps to an installed controlled adapter.
-3. Create explicit execution policies for delegated workspace actors; absent policy is DENY.
-4. Create a task, classify it, and create a bounded plan.
-5. Inspect and approve HIGH/CRITICAL plans.
-6. Execute the plan and inspect results, runs, and events.
-7. Suspend a workspace or disable a capability to stop new protected execution.
+1. Create an active workspace, capability, and explicit execution policy.
+2. Create and classify a task, then create a bounded plan.
+3. Grant owner approval for HIGH/CRITICAL plans.
+4. Execute and inspect `/results`, `/runs`, `/events`, and `/telemetry`.
+5. Use `/operations/overview` for current operational health.
+6. Trigger a safe-stop before investigation or risky maintenance.
+7. Resolve incidents and release safe-stops only after evidence is reviewed.
+8. Use `/runs/:id/recover`; completed idempotent outcomes return their recorded result, while uncertain outcomes remain blocked.
 
 ## Quality gate
 
@@ -134,7 +141,7 @@ npm run build
 npm audit
 ```
 
-Expected current result: 2 test files, 44 tests passing.
+Expected result: 3 test files and 54 tests passing before deployment.
 
 ## Deployment
 
@@ -143,20 +150,33 @@ Expected current result: 2 test files, 44 tests passing.
 - Repository: `https://github.com/Sparkmind-obp-off/Halstral`
 - Production branch: `main`
 - Deployment path: Cloudflare BYOK (`wrangler pages`)
+- Current target migration: `0003_phase_3_safety_observability_recovery.sql`
 
-Production deployment requires applying migration `0002_phase_2_orchestration.sql` before publishing the Phase 2 worker.
+Production procedure:
 
-## Known limitations / not implemented
+```bash
+npm run build
+npm run db:migrate:prod
+npx wrangler pages deploy dist --project-name halstral
+```
 
-- Only deterministic internal adapters are installed in production Phase 2; external connectors require separate reviewed adapter contracts and secrets.
-- No unrestricted agents, browser automation, financial transactions, arbitrary remote code execution, or global credentials.
-- Cancellation is cooperative at adapter boundaries; adapters must honor `AbortSignal` for immediate interruption.
-- D1 persistence and audit appends are separate operations rather than one multi-table transaction.
-- Managed identity federation, rate limiting, pagination, and credential-resolution infrastructure remain future hardening work.
+`CONTROL_PLANE_TOKEN` must remain a Cloudflare secret and must never be committed.
+
+## Features not implemented / known limits
+
+- Only deterministic internal adapters are installed; external connectors require separately reviewed contracts and scoped secret resolution.
+- D1 persistence and event appends span multiple statements; Cloudflare D1 transaction/session hardening remains a future improvement.
+- Rate limiting is isolate-local and defensive, not a globally strict quota. A durable D1 or purpose-built edge limiter is recommended before opening sensitive APIs broadly.
+- Cancellation is cooperative; adapter implementations must honor `AbortSignal`.
+- Recovery intentionally does not auto-replay unknown side effects.
+- There is no browser-based owner dashboard; Phase 3 owner controls are authenticated JSON APIs.
 
 ## Recommended next steps
 
-1. Add reviewed external adapters one capability at a time with scoped secret resolution.
-2. Add durable owner identity/approval authentication before delegated production operators expand.
-3. Add scheduled recovery only through a separately designed Cloudflare-compatible mechanism.
-4. Operate Phase 2 and review audit evidence before designing Phase 3 optimization or learning behavior.
+1. Operate Phase 3 and review incident/recovery evidence before any Phase 4 learning or optimization.
+2. Add reviewed external adapters one capability at a time with verified idempotency semantics.
+3. Add durable owner identity and short-lived scoped credentials instead of a shared bearer token.
+4. Add atomic D1 persistence for related protected state transitions where platform semantics permit.
+5. Build a read-only owner dashboard over the existing operations API if a visual console is required.
+
+Last updated: 2026-09-16.
