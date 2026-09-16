@@ -11,6 +11,10 @@ export const FAILURE_CLASSES = ['TRANSIENT', 'VALIDATION', 'AUTHORIZATION', 'CRE
 export const INCIDENT_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
 export const INCIDENT_STATUSES = ['OPEN', 'ACKNOWLEDGED', 'MITIGATED', 'RESOLVED', 'CLOSED'] as const
 export const SAFE_STOP_SCOPES = ['STEP', 'RUN', 'TASK', 'CAPABILITY', 'WORKSPACE', 'CORE'] as const
+export const OUTCOME_STATUSES = ['SUCCEEDED', 'FAILED', 'CANCELLED', 'BLOCKED', 'RECOVERED'] as const
+export const SIGNAL_VALIDATION_STATUSES = ['UNVERIFIED', 'VERIFIED', 'REJECTED'] as const
+export const PROPOSAL_STATUSES = ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'APPLIED', 'REJECTED', 'REVERTED', 'DISABLED'] as const
+export const PROMOTION_STATUSES = ['PROPOSED', 'APPROVED', 'PROMOTED', 'REJECTED', 'DISABLED'] as const
 
 export type WorkspaceStatus = typeof WORKSPACE_STATUSES[number]
 export type CapabilityStatus = typeof CAPABILITY_STATUSES[number]
@@ -27,6 +31,10 @@ export type IncidentSeverity = typeof INCIDENT_SEVERITIES[number]
 export type IncidentStatus = typeof INCIDENT_STATUSES[number]
 export type SafeStopScope = typeof SAFE_STOP_SCOPES[number]
 export type ExecutionOutcome = 'NOT_STARTED' | 'KNOWN_FAILURE' | 'UNKNOWN' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+export type OutcomeStatus = typeof OUTCOME_STATUSES[number]
+export type SignalValidationStatus = typeof SIGNAL_VALIDATION_STATUSES[number]
+export type ProposalStatus = typeof PROPOSAL_STATUSES[number]
+export type PromotionStatus = typeof PROMOTION_STATUSES[number]
 
 export type Actor = { id: string; type: 'OWNER' | 'WORKSPACE' }
 
@@ -245,6 +253,106 @@ export interface TelemetryRecord {
   metadata: Record<string, unknown>
 }
 
+export interface OutcomeRecord {
+  id: string
+  workspaceId: string
+  taskId: string
+  runId: string
+  capabilityId: string
+  versionId: string
+  status: OutcomeStatus
+  startedAt: string
+  completedAt: string
+  durationMs: number
+  attempts: number
+  retries: number
+  policyOutcome: 'ALLOW' | 'DENY' | 'NOT_EVALUATED'
+  errorClass: FailureClass | null
+  metrics: Record<string, number>
+  sourceType: 'EXECUTION_RESULT' | 'RUN' | 'RECOVERY'
+  sourceId: string
+  verified: boolean
+  capturedAt: string
+}
+
+export interface LearningSignal {
+  id: string
+  workspaceId: string
+  targetType: 'CAPABILITY' | 'WORKFLOW'
+  targetId: string
+  versionId: string
+  signalType: 'SUCCESS_RATE' | 'FAILURE_RATE' | 'AVERAGE_LATENCY' | 'RETRY_RATE' | 'TIMEOUT_RATE' | 'RECOVERY_RATE' | 'POLICY_DENIAL_RATE' | 'QUALITY' | 'COST'
+  value: number
+  sampleSize: number
+  outcomeRefs: string[]
+  validationStatus: SignalValidationStatus
+  confidence: number
+  createdAt: string
+}
+
+export interface ConfigurationRevision {
+  id: string
+  workspaceId: string
+  targetType: 'CAPABILITY' | 'WORKFLOW'
+  targetId: string
+  version: number
+  config: Record<string, unknown>
+  previousRevisionId: string | null
+  proposalId: string | null
+  status: 'ACTIVE' | 'REVERTED' | 'DISABLED'
+  createdAt: string
+  activatedAt: string | null
+}
+
+export interface OptimizationProposal {
+  id: string
+  workspaceId: string
+  targetType: 'CAPABILITY' | 'WORKFLOW'
+  targetId: string
+  reason: string
+  evidenceRefs: string[]
+  currentConfig: Record<string, unknown>
+  proposedConfig: Record<string, unknown>
+  expectedEffect: Record<string, unknown>
+  riskClass: RiskLevel
+  status: ProposalStatus
+  baseRevisionId: string | null
+  appliedRevisionId: string | null
+  approvalRef: string | null
+  createdAt: string
+  reviewedAt: string | null
+  appliedAt: string | null
+  revertedAt: string | null
+}
+
+export interface PerformanceMeasurement {
+  id: string
+  workspaceId: string
+  targetType: 'CAPABILITY' | 'WORKFLOW'
+  targetId: string
+  versionId: string
+  period: 'BASELINE' | 'POST_CHANGE'
+  outcomeRefs: string[]
+  metrics: Record<string, number>
+  measuredAt: string
+}
+
+export interface CapabilityPromotion {
+  id: string
+  workspaceId: string
+  capabilityId: string
+  ownerId: string
+  provenanceRefs: string[]
+  performanceMeasurementIds: string[]
+  securityContract: Record<string, unknown>
+  scope: Record<string, unknown>
+  status: PromotionStatus
+  approvalRef: string | null
+  createdAt: string
+  reviewedAt: string | null
+  promotedAt: string | null
+}
+
 export type EventType =
   | 'WORKSPACE_CREATED' | 'WORKSPACE_UPDATED' | 'WORKSPACE_SUSPENDED' | 'WORKSPACE_ARCHIVED'
   | 'CAPABILITY_CREATED' | 'CAPABILITY_UPDATED' | 'CAPABILITY_DISABLED'
@@ -258,6 +366,10 @@ export type EventType =
   | 'SAFE_STOP_TRIGGERED' | 'SAFE_STOP_RELEASED' | 'INCIDENT_CREATED' | 'INCIDENT_RESOLVED' | 'CONCURRENCY_LIMIT_REACHED'
   | 'RUN_CREATED' | 'RUN_STARTED' | 'RUN_COMPLETED' | 'RUN_FAILED' | 'RUN_CANCELLED'
   | 'AUTHORIZATION_GRANTED' | 'AUTHORIZATION_DENIED'
+  | 'OUTCOME_CAPTURED' | 'LEARNING_SIGNAL_CREATED'
+  | 'OPTIMIZATION_PROPOSED' | 'OPTIMIZATION_APPROVED' | 'OPTIMIZATION_APPLIED' | 'OPTIMIZATION_REVERTED' | 'OPTIMIZATION_REJECTED'
+  | 'CAPABILITY_PROMOTION_PROPOSED' | 'CAPABILITY_PROMOTED' | 'CAPABILITY_PROMOTION_REJECTED'
+  | 'PERFORMANCE_MEASURED'
 
 export interface AuditEvent {
   id: string

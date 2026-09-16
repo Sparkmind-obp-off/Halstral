@@ -1,4 +1,4 @@
-import type { AuditEvent, Capability, ExecutionPlan, ExecutionResult, IdempotencyRecord, Incident, Policy, RecoveryRecord, Run, SafeStop, Task, TelemetryRecord, Workspace } from '../domain/models'
+import type { AuditEvent, Capability, CapabilityPromotion, ConfigurationRevision, ExecutionPlan, ExecutionResult, IdempotencyRecord, Incident, LearningSignal, OptimizationProposal, OutcomeRecord, PerformanceMeasurement, Policy, RecoveryRecord, Run, SafeStop, Task, TelemetryRecord, Workspace } from '../domain/models'
 
 export interface Repository {
   createWorkspace(value: Workspace): Promise<void>
@@ -57,6 +57,33 @@ export interface Repository {
 
   createTelemetry(value: TelemetryRecord): Promise<void>
   listTelemetry(): Promise<TelemetryRecord[]>
+
+  createOutcome(value: OutcomeRecord): Promise<void>
+  getOutcome(id: string): Promise<OutcomeRecord | null>
+  listOutcomes(): Promise<OutcomeRecord[]>
+
+  createLearningSignal(value: LearningSignal): Promise<void>
+  getLearningSignal(id: string): Promise<LearningSignal | null>
+  listLearningSignals(): Promise<LearningSignal[]>
+
+  createOptimizationProposal(value: OptimizationProposal): Promise<void>
+  getOptimizationProposal(id: string): Promise<OptimizationProposal | null>
+  listOptimizationProposals(): Promise<OptimizationProposal[]>
+  saveOptimizationProposal(value: OptimizationProposal): Promise<void>
+
+  createConfigurationRevision(value: ConfigurationRevision): Promise<void>
+  getConfigurationRevision(id: string): Promise<ConfigurationRevision | null>
+  listConfigurationRevisions(): Promise<ConfigurationRevision[]>
+  saveConfigurationRevision(value: ConfigurationRevision): Promise<void>
+
+  createPerformanceMeasurement(value: PerformanceMeasurement): Promise<void>
+  getPerformanceMeasurement(id: string): Promise<PerformanceMeasurement | null>
+  listPerformanceMeasurements(): Promise<PerformanceMeasurement[]>
+
+  createCapabilityPromotion(value: CapabilityPromotion): Promise<void>
+  getCapabilityPromotion(id: string): Promise<CapabilityPromotion | null>
+  listCapabilityPromotions(): Promise<CapabilityPromotion[]>
+  saveCapabilityPromotion(value: CapabilityPromotion): Promise<void>
 
   appendEvent(value: AuditEvent): Promise<void>
   getEvent(id: string): Promise<AuditEvent | null>

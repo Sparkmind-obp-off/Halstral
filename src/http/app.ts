@@ -3,6 +3,7 @@ import { INCIDENT_STATUSES, SAFE_STOP_SCOPES, type Actor, type IncidentStatus, t
 import { DomainError } from '../domain/errors'
 import { ControlPlane } from '../application/control-plane'
 import { OrchestrationEngine } from '../application/orchestration-engine'
+import { LearningEngine } from '../application/learning-engine'
 
 const equalSecret = async (left: string, right: string) => {
   const encode = new TextEncoder()
@@ -17,7 +18,7 @@ const body = async (c: { req: { json: () => Promise<unknown> } }) => {
   catch { throw new DomainError('INVALID_JSON', 'Request body must be a JSON object', 400) }
 }
 
-export function createApp(controlPlane: ControlPlane, controlToken: string, ownerId = 'owner_halstral', orchestration?: OrchestrationEngine) {
+export function createApp(controlPlane: ControlPlane, controlToken: string, ownerId = 'owner_halstral', orchestration?: OrchestrationEngine, learning?: LearningEngine) {
   const app = new Hono<{ Variables: { actor: Actor } }>()
   const rateWindows = new Map<string, { count: number; expiresAt: number }>()
 
@@ -35,9 +36,9 @@ export function createApp(controlPlane: ControlPlane, controlToken: string, owne
     c.res.headers.set('Cache-Control', c.req.path === '/' || c.req.path === '/health' ? 'no-store' : 'private, no-store')
   })
 
-  app.get('/', (c) => c.json({ name: 'HALSTRAL', role: 'Private Business Orchestration Core', phase: orchestration ? 3 : 1, execution: orchestration ? 'safe-observable-recoverable' : 'registry-only', arbitraryCodeExecution: false }))
-  app.get('/health', (c) => c.json({ status: 'ok', phase: 3 }))
-  app.get('/api/health', (c) => c.json({ status: 'ok', phase: 3 }))
+  app.get('/', (c) => c.json({ name: 'HALSTRAL', role: 'Private Business Orchestration Core', phase: learning ? 4 : orchestration ? 3 : 1, execution: learning ? 'controlled-learning-optimization' : orchestration ? 'safe-observable-recoverable' : 'registry-only', arbitraryCodeExecution: false }))
+  app.get('/health', (c) => c.json({ status: 'ok', phase: learning ? 4 : 3 }))
+  app.get('/api/health', (c) => c.json({ status: 'ok', phase: learning ? 4 : 3 }))
 
   app.use('*', async (c, next) => {
     if (c.req.path === '/' || c.req.path === '/health' || c.req.path === '/api/health') return next()
@@ -125,6 +126,25 @@ export function createApp(controlPlane: ControlPlane, controlToken: string, owne
   app.get('/runs/:id', async (c) => c.json(await controlPlane.getRun(c.req.param('id'), c.get('actor'))))
   app.patch('/runs/:id', async (c) => { const input = await body(c); return c.json(await controlPlane.updateRun(c.req.param('id'), input.status, c.get('actor'), input.error)) })
   app.post('/runs/:id/recover', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Recovery is unavailable', 501); return c.json(await orchestration.recoverRun(c.req.param('id'), c.get('actor'))) })
+
+  app.get('/outcomes', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501); return c.json(await learning.listOutcomes(c.get('actor'), c.req.query('workspaceId'))) })
+  app.post('/outcomes', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501); return c.json(await learning.captureOutcome(await body(c) as never,c.get('actor')),201) })
+  app.get('/learning-signals', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501); return c.json(await learning.listSignals(c.get('actor'),c.req.query('workspaceId'))) })
+  app.post('/learning-signals/derive', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501); const i=await body(c);return c.json(await learning.deriveSignals(String(i.workspaceId??''),String(i.targetId??''),c.get('actor')),201) })
+  app.get('/optimization-proposals', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.listProposals(c.get('actor'),c.req.query('workspaceId'))) })
+  app.post('/optimization-proposals', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.createProposal(await body(c) as never,c.get('actor')),201) })
+  app.post('/optimization-proposals/:id/submit', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.submitProposal(c.req.param('id'),c.get('actor'))) })
+  app.post('/optimization-proposals/:id/decision', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);const i=await body(c);return c.json(await learning.decideProposal(c.req.param('id'),i.decision==='APPROVED',String(i.approvalRef??''),c.get('actor'))) })
+  app.post('/optimization-proposals/:id/apply', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.applyProposal(c.req.param('id'),c.get('actor'))) })
+  app.post('/optimization-proposals/:id/revert', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.revertProposal(c.req.param('id'),c.get('actor'))) })
+  app.post('/optimization-proposals/:id/disable', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.revertProposal(c.req.param('id'),c.get('actor'),true)) })
+  app.get('/configuration-revisions', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.listRevisions(c.get('actor'),c.req.query('workspaceId'))) })
+  app.post('/performance-measurements', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.measure(await body(c) as never,c.get('actor')),201) })
+  app.get('/performance-comparison', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.comparePerformance(String(c.req.query('workspaceId')??''),String(c.req.query('targetId')??''),c.get('actor'))) })
+  app.get('/capability-promotions', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.listPromotions(c.get('actor'),c.req.query('workspaceId'))) })
+  app.post('/capability-promotions', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.proposePromotion(await body(c) as never,c.get('actor')),201) })
+  app.post('/capability-promotions/:id/decision', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);const i=await body(c);return c.json(await learning.decidePromotion(c.req.param('id'),i.decision==='APPROVED',String(i.approvalRef??''),c.get('actor'))) })
+  app.post('/capability-promotions/:id/promote', async (c) => { if (!learning) throw new DomainError('NOT_IMPLEMENTED','Learning is unavailable',501);return c.json(await learning.promote(c.req.param('id'),c.get('actor'))) })
 
   app.get('/events', async (c) => c.json(await controlPlane.listEvents(c.get('actor'))))
   app.get('/events/:id', async (c) => c.json(await controlPlane.getEvent(c.req.param('id'), c.get('actor'))))
