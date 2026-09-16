@@ -1,4 +1,4 @@
-import type { AuditEvent, Capability, Policy, Run, Task, Workspace } from '../domain/models'
+import type { AuditEvent, Capability, ExecutionPlan, ExecutionResult, IdempotencyRecord, Policy, Run, Task, Workspace } from '../domain/models'
 import type { Repository } from '../ports/repository'
 
 const copy = <T>(value: T): T => structuredClone(value)
@@ -9,6 +9,9 @@ export class MemoryRepository implements Repository {
   private policies = new Map<string, Policy>()
   private tasks = new Map<string, Task>()
   private runs = new Map<string, Run>()
+  private plans = new Map<string, ExecutionPlan>()
+  private results = new Map<string, ExecutionResult>()
+  private idempotency = new Map<string, IdempotencyRecord>()
   private events = new Map<string, AuditEvent>()
 
   async createWorkspace(value: Workspace) { if ([...this.workspaces.values()].some((item) => item.slug === value.slug)) throw new Error('UNIQUE constraint failed: workspaces.slug'); this.workspaces.set(value.id, copy(value)) }
@@ -35,6 +38,20 @@ export class MemoryRepository implements Repository {
   async getRun(id: string) { return copy(this.runs.get(id) ?? null) }
   async listRuns() { return copy([...this.runs.values()]) }
   async saveRun(value: Run) { this.runs.set(value.id, copy(value)) }
+
+  async createPlan(value: ExecutionPlan) { this.plans.set(value.id, copy(value)) }
+  async getPlan(id: string) { return copy(this.plans.get(id) ?? null) }
+  async getPlanByTask(taskId: string) { return copy([...this.plans.values()].find((item) => item.taskId === taskId) ?? null) }
+  async listPlans() { return copy([...this.plans.values()]) }
+  async savePlan(value: ExecutionPlan) { this.plans.set(value.id, copy(value)) }
+
+  async createResult(value: ExecutionResult) { this.results.set(value.id, copy(value)) }
+  async getResult(id: string) { return copy(this.results.get(id) ?? null) }
+  async listResults() { return copy([...this.results.values()]) }
+
+  async createIdempotencyRecord(value: IdempotencyRecord) { if (this.idempotency.has(value.key)) return false; this.idempotency.set(value.key, copy(value)); return true }
+  async getIdempotencyRecord(key: string) { return copy(this.idempotency.get(key) ?? null) }
+  async saveIdempotencyRecord(value: IdempotencyRecord) { this.idempotency.set(value.key, copy(value)) }
 
   async appendEvent(value: AuditEvent) { if (this.events.has(value.id)) throw new Error('Audit events are immutable'); this.events.set(value.id, copy(value)) }
   async getEvent(id: string) { return copy(this.events.get(id) ?? null) }

@@ -1,4 +1,4 @@
-import type { AuditEvent, Capability, Policy, Run, Task, Workspace } from '../domain/models'
+import type { AuditEvent, Capability, ExecutionPlan, ExecutionResult, IdempotencyRecord, Policy, Run, Task, Workspace } from '../domain/models'
 
 export interface Repository {
   createWorkspace(value: Workspace): Promise<void>
@@ -25,6 +25,20 @@ export interface Repository {
   getRun(id: string): Promise<Run | null>
   listRuns(): Promise<Run[]>
   saveRun(value: Run): Promise<void>
+
+  createPlan(value: ExecutionPlan): Promise<void>
+  getPlan(id: string): Promise<ExecutionPlan | null>
+  getPlanByTask(taskId: string): Promise<ExecutionPlan | null>
+  listPlans(): Promise<ExecutionPlan[]>
+  savePlan(value: ExecutionPlan): Promise<void>
+
+  createResult(value: ExecutionResult): Promise<void>
+  getResult(id: string): Promise<ExecutionResult | null>
+  listResults(): Promise<ExecutionResult[]>
+
+  createIdempotencyRecord(value: IdempotencyRecord): Promise<boolean>
+  getIdempotencyRecord(key: string): Promise<IdempotencyRecord | null>
+  saveIdempotencyRecord(value: IdempotencyRecord): Promise<void>
 
   appendEvent(value: AuditEvent): Promise<void>
   getEvent(id: string): Promise<AuditEvent | null>

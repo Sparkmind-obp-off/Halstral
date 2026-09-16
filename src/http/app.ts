@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { Actor } from '../domain/models'
 import { DomainError } from '../domain/errors'
 import { ControlPlane } from '../application/control-plane'
+import { OrchestrationEngine } from '../application/orchestration-engine'
 
 const equalSecret = async (left: string, right: string) => {
   const encode = new TextEncoder()
@@ -16,10 +17,10 @@ const body = async (c: { req: { json: () => Promise<unknown> } }) => {
   catch { throw new DomainError('INVALID_JSON', 'Request body must be a JSON object', 400) }
 }
 
-export function createApp(controlPlane: ControlPlane, controlToken: string, ownerId = 'owner_halstral') {
+export function createApp(controlPlane: ControlPlane, controlToken: string, ownerId = 'owner_halstral', orchestration?: OrchestrationEngine) {
   const app = new Hono<{ Variables: { actor: Actor } }>()
 
-  app.get('/', (c) => c.json({ name: 'HALSTRAL', role: 'Private Business Orchestration Core', phase: 1, autonomousExecution: false }))
+  app.get('/', (c) => c.json({ name: 'HALSTRAL', role: 'Private Business Orchestration Core', phase: orchestration ? 2 : 1, execution: orchestration ? 'governed-internal-adapters' : 'registry-only', arbitraryCodeExecution: false }))
   app.get('/health', (c) => c.json({ status: 'ok' }))
 
   app.use('*', async (c, next) => {
@@ -54,7 +55,23 @@ export function createApp(controlPlane: ControlPlane, controlToken: string, owne
   app.post('/tasks', async (c) => c.json(await controlPlane.createTask(await body(c), c.get('actor')), 201))
   app.get('/tasks/:id', async (c) => c.json(await controlPlane.getTask(c.req.param('id'), c.get('actor'))))
   app.patch('/tasks/:id', async (c) => c.json(await controlPlane.updateTask(c.req.param('id'), await body(c), c.get('actor'))))
-  app.post('/tasks/:id/cancel', async (c) => c.json(await controlPlane.cancelTask(c.req.param('id'), c.get('actor'))))
+  app.post('/tasks/:id/cancel', async (c) => c.json(orchestration ? await orchestration.cancel(c.req.param('id'), c.get('actor')) : await controlPlane.cancelTask(c.req.param('id'), c.get('actor'))))
+  app.post('/tasks/:id/classify', async (c) => {
+    if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Orchestration is unavailable', 501)
+    return c.json(await orchestration.classifyTask(c.req.param('id'), await body(c), c.get('actor')))
+  })
+  app.post('/tasks/:id/plans', async (c) => {
+    if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Orchestration is unavailable', 501)
+    return c.json(await orchestration.createPlan(c.req.param('id'), await body(c), c.get('actor')), 201)
+  })
+
+  app.get('/plans', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Orchestration is unavailable', 501); return c.json(await orchestration.listPlans(c.get('actor'))) })
+  app.get('/plans/:id', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Orchestration is unavailable', 501); return c.json(await orchestration.getPlan(c.req.param('id'), c.get('actor'))) })
+  app.post('/plans/:id/approval', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Orchestration is unavailable', 501); const input = await body(c); return c.json(await orchestration.decideApproval(c.req.param('id'), input.decision === 'GRANTED', String(input.approvalRef ?? ''), c.get('actor'))) })
+  app.post('/plans/:id/execute', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Orchestration is unavailable', 501); return c.json(await orchestration.executePlan(c.req.param('id'), c.get('actor'))) })
+
+  app.get('/results', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Orchestration is unavailable', 501); return c.json(await orchestration.listResults(c.get('actor'))) })
+  app.get('/results/:id', async (c) => { if (!orchestration) throw new DomainError('NOT_IMPLEMENTED', 'Orchestration is unavailable', 501); return c.json(await orchestration.getResult(c.req.param('id'), c.get('actor'))) })
 
   app.get('/runs', async (c) => c.json(await controlPlane.listRuns(c.get('actor'))))
   app.post('/runs', async (c) => c.json(await controlPlane.createRun(await body(c), c.get('actor')), 201))

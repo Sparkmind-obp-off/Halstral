@@ -1,4 +1,4 @@
-import type { AuditEvent, Capability, Policy, Run, Task, Workspace } from '../domain/models'
+import type { AuditEvent, Capability, ExecutionPlan, ExecutionResult, IdempotencyRecord, Policy, Run, Task, Workspace } from '../domain/models'
 import type { Repository } from '../ports/repository'
 
 type Row = Record<string, unknown>
@@ -9,7 +9,10 @@ const workspace = (r: Row): Workspace => ({ id: String(r.id), slug: String(r.slu
 const capability = (r: Row): Capability => ({ id: String(r.id), name: String(r.name), description: String(r.description), ownerScope: r.owner_scope as Capability['ownerScope'], workspaceId: r.workspace_id ? String(r.workspace_id) : null, riskLevel: r.risk_level as Capability['riskLevel'], inputSchema: parse(r.input_schema), outputSchema: parse(r.output_schema), status: r.status as Capability['status'], createdAt: String(r.created_at), updatedAt: String(r.updated_at) })
 const policy = (r: Row): Policy => ({ id: String(r.id), name: String(r.name), workspaceId: String(r.workspace_id), subject: String(r.subject), resource: String(r.resource), action: String(r.action), scope: String(r.scope), effect: r.effect as Policy['effect'], approvalRequired: Boolean(r.approval_required), status: r.status as Policy['status'], createdAt: String(r.created_at), updatedAt: String(r.updated_at) })
 const task = (r: Row): Task => ({ id: String(r.id), workspaceId: String(r.workspace_id), title: String(r.title), description: String(r.description), status: r.status as Task['status'], capabilityId: r.capability_id ? String(r.capability_id) : null, credentialRef: r.credential_ref ? String(r.credential_ref) : null, createdAt: String(r.created_at), updatedAt: String(r.updated_at) })
-const run = (r: Row): Run => ({ id: String(r.id), taskId: String(r.task_id), workspaceId: String(r.workspace_id), status: r.status as Run['status'], startedAt: r.started_at ? String(r.started_at) : null, completedAt: r.completed_at ? String(r.completed_at) : null, error: r.error ? String(r.error) : null, createdAt: String(r.created_at), updatedAt: String(r.updated_at) })
+const run = (r: Row): Run => ({ id: String(r.id), taskId: String(r.task_id), workspaceId: String(r.workspace_id), status: r.status as Run['status'], attempt: Number(r.attempt ?? 0), idempotencyKey: r.idempotency_key ? String(r.idempotency_key) : null, startedAt: r.started_at ? String(r.started_at) : null, completedAt: r.completed_at ? String(r.completed_at) : null, error: r.error ? String(r.error) : null, createdAt: String(r.created_at), updatedAt: String(r.updated_at) })
+const plan = (r: Row): ExecutionPlan => ({ id: String(r.id), taskId: String(r.task_id), workspaceId: String(r.workspace_id), steps: parse(r.steps), status: r.status as ExecutionPlan['status'], overallTimeoutSeconds: Number(r.overall_timeout_seconds), createdAt: String(r.created_at), updatedAt: String(r.updated_at) })
+const result = (r: Row): ExecutionResult => ({ id: String(r.id), taskId: String(r.task_id), runId: String(r.run_id), workspaceId: String(r.workspace_id), stepId: String(r.step_id), status: r.status as ExecutionResult['status'], output: r.output ? parse(r.output) : null, errorCode: r.error_code ? String(r.error_code) : null, errorMessage: r.error_message ? String(r.error_message) : null, createdAt: String(r.created_at) })
+const idempotency = (r: Row): IdempotencyRecord => ({ key: String(r.key), workspaceId: String(r.workspace_id), capabilityId: String(r.capability_id), status: r.status as IdempotencyRecord['status'], resultId: r.result_id ? String(r.result_id) : null, createdAt: String(r.created_at), updatedAt: String(r.updated_at) })
 const event = (r: Row): AuditEvent => ({ id: String(r.id), type: r.type as AuditEvent['type'], actor: parse(r.actor), workspaceId: r.workspace_id ? String(r.workspace_id) : null, resourceType: String(r.resource_type), resourceId: String(r.resource_id), timestamp: String(r.timestamp), metadata: parse(r.metadata) })
 
 export class D1Repository implements Repository {
@@ -37,10 +40,24 @@ export class D1Repository implements Repository {
   listTasks() { return this.many('SELECT * FROM tasks ORDER BY created_at', task) }
   async saveTask(v: Task) { await this.db.prepare('UPDATE tasks SET title=?,description=?,status=?,capability_id=?,credential_ref=?,updated_at=? WHERE id=?').bind(v.title,v.description,v.status,v.capabilityId,v.credentialRef,v.updatedAt,v.id).run() }
 
-  async createRun(v: Run) { await this.db.prepare('INSERT INTO runs (id,task_id,workspace_id,status,started_at,completed_at,error,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(v.id,v.taskId,v.workspaceId,v.status,v.startedAt,v.completedAt,v.error,v.createdAt,v.updatedAt).run() }
+  async createRun(v: Run) { await this.db.prepare('INSERT INTO runs (id,task_id,workspace_id,status,attempt,idempotency_key,started_at,completed_at,error,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').bind(v.id,v.taskId,v.workspaceId,v.status,v.attempt,v.idempotencyKey,v.startedAt,v.completedAt,v.error,v.createdAt,v.updatedAt).run() }
   getRun(id: string) { return this.one('SELECT * FROM runs WHERE id=?', id, run) }
   listRuns() { return this.many('SELECT * FROM runs ORDER BY created_at', run) }
-  async saveRun(v: Run) { await this.db.prepare('UPDATE runs SET status=?,started_at=?,completed_at=?,error=?,updated_at=? WHERE id=?').bind(v.status,v.startedAt,v.completedAt,v.error,v.updatedAt,v.id).run() }
+  async saveRun(v: Run) { await this.db.prepare('UPDATE runs SET status=?,attempt=?,idempotency_key=?,started_at=?,completed_at=?,error=?,updated_at=? WHERE id=?').bind(v.status,v.attempt,v.idempotencyKey,v.startedAt,v.completedAt,v.error,v.updatedAt,v.id).run() }
+
+  async createPlan(v: ExecutionPlan) { await this.db.prepare('INSERT INTO execution_plans (id,task_id,workspace_id,steps,status,overall_timeout_seconds,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(v.id,v.taskId,v.workspaceId,json(v.steps),v.status,v.overallTimeoutSeconds,v.createdAt,v.updatedAt).run() }
+  getPlan(id: string) { return this.one('SELECT * FROM execution_plans WHERE id=?', id, plan) }
+  async getPlanByTask(taskId: string) { const row = await this.db.prepare('SELECT * FROM execution_plans WHERE task_id=? ORDER BY created_at DESC LIMIT 1').bind(taskId).first<Row>(); return row ? plan(row) : null }
+  listPlans() { return this.many('SELECT * FROM execution_plans ORDER BY created_at', plan) }
+  async savePlan(v: ExecutionPlan) { await this.db.prepare('UPDATE execution_plans SET steps=?,status=?,overall_timeout_seconds=?,updated_at=? WHERE id=?').bind(json(v.steps),v.status,v.overallTimeoutSeconds,v.updatedAt,v.id).run() }
+
+  async createResult(v: ExecutionResult) { await this.db.prepare('INSERT INTO execution_results (id,task_id,run_id,workspace_id,step_id,status,output,error_code,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').bind(v.id,v.taskId,v.runId,v.workspaceId,v.stepId,v.status,v.output ? json(v.output) : null,v.errorCode,v.errorMessage,v.createdAt).run() }
+  getResult(id: string) { return this.one('SELECT * FROM execution_results WHERE id=?', id, result) }
+  listResults() { return this.many('SELECT * FROM execution_results ORDER BY created_at', result) }
+
+  async createIdempotencyRecord(v: IdempotencyRecord) { const found = await this.getIdempotencyRecord(v.key); if (found) return false; await this.db.prepare('INSERT INTO idempotency_records (key,workspace_id,capability_id,status,result_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').bind(v.key,v.workspaceId,v.capabilityId,v.status,v.resultId,v.createdAt,v.updatedAt).run(); return true }
+  getIdempotencyRecord(key: string) { return this.one('SELECT * FROM idempotency_records WHERE key=?', key, idempotency) }
+  async saveIdempotencyRecord(v: IdempotencyRecord) { await this.db.prepare('UPDATE idempotency_records SET status=?,result_id=?,updated_at=? WHERE key=?').bind(v.status,v.resultId,v.updatedAt,v.key).run() }
 
   async appendEvent(v: AuditEvent) { await this.db.prepare('INSERT INTO events (id,type,actor,workspace_id,resource_type,resource_id,timestamp,metadata) VALUES (?,?,?,?,?,?,?,?)').bind(v.id,v.type,json(v.actor),v.workspaceId,v.resourceType,v.resourceId,v.timestamp,json(v.metadata)).run() }
   getEvent(id: string) { return this.one('SELECT * FROM events WHERE id=?', id, event) }

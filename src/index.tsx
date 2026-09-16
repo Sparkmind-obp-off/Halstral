@@ -1,6 +1,9 @@
 import { Hono } from 'hono'
 import { ControlPlane } from './application/control-plane'
 import { D1Repository } from './adapters/d1-repository'
+import { InternalExecutionAdapter } from './adapters/internal-execution-adapter'
+import { OrchestrationEngine } from './application/orchestration-engine'
+import { AdapterRegistry } from './ports/execution-adapter'
 import { createApp } from './http/app'
 
 type Bindings = {
@@ -13,7 +16,11 @@ const app = new Hono<{ Bindings: Bindings }>()
 
 app.route('/', new Hono<{ Bindings: Bindings }>().all('*', async (c) => {
   const ownerId = c.env.OWNER_ID ?? 'owner_halstral'
-  const api = createApp(new ControlPlane(new D1Repository(c.env.DB), ownerId), c.env.CONTROL_PLANE_TOKEN, ownerId)
+  const repository = new D1Repository(c.env.DB)
+  const adapters = new AdapterRegistry()
+  adapters.register(new InternalExecutionAdapter())
+  const orchestration = new OrchestrationEngine(repository, adapters, ownerId)
+  const api = createApp(new ControlPlane(repository, ownerId), c.env.CONTROL_PLANE_TOKEN, ownerId, orchestration)
   return api.fetch(c.req.raw)
 }))
 

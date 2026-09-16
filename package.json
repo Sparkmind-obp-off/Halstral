@@ -1,6 +1,6 @@
 {
   "name": "halstral-control-plane",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "db:migrate:local": "wrangler d1 migrations apply halstral-production --local"
+    "db:migrate:local": "wrangler d1 migrations apply halstral-production --local",
+    "db:migrate:prod": "wrangler d1 migrations apply halstral-production --remote"
   },
   "dependencies": {
     "hono": "^4.9.7"
