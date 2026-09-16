@@ -101,9 +101,9 @@ Acceptance evidence is maintained in [`docs/09_PHASE_1_ACCEPTANCE_EVIDENCE.md`](
 ## Deployment
 
 - Platform: Cloudflare Pages + D1
-- Production URL: pending first BYOK deployment
+- Production URL: `https://halstral.pages.dev`
 - Repository: `https://github.com/Sparkmind-obp-off/Hastral`
-- Production status: build verified; deployment pending
+- Production status: active (Cloudflare Pages BYOK + production D1)
 
 ## Not implemented / known limitations
 

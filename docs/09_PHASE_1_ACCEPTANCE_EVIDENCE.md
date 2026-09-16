@@ -25,6 +25,9 @@ Current evidence:
 - Local D1 migration: `0001_phase_1.sql` PASS (17 commands)
 - D1 schema inspection: all seven required tables plus immutable-event triggers present
 - Authenticated local D1 API smoke test: PASS
+- Production D1 migration: PASS (7 required domain tables verified)
+- Cloudflare Pages BYOK deployment: PASS at `https://halstral.pages.dev`
+- Production public health, unauthenticated rejection, and authenticated D1 read: PASS
 
 ## Acceptance criteria mapping
 
@@ -55,4 +58,4 @@ The suite covers all 17 requested behaviors, including workspace CRUD/lifecycle,
 
 ## Phase boundary
 
-This evidence authorizes only the Phase 1 registry/control-plane milestone. It does not add or authorize autonomous external execution. Final commit SHA and production deployment URL are recorded in the final implementation report after deployment.
+This evidence authorizes only the Phase 1 registry/control-plane milestone. It does not add or authorize autonomous external execution. Production is active at `https://halstral.pages.dev`. The final implementation commit SHA is recorded in the final report.
