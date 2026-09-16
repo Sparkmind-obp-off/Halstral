@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "halstral",
+  "compatibility_date": "2025-09-17",
+  "pages_build_output_dir": "./dist",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "halstral-production",
+      "database_id": "eab6a2fd-9103-4e4b-8735-55417ce1a358"
+    }
+  ]
+}

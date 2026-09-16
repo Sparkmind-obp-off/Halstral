@@ -2,49 +2,119 @@
 
 **Private Business Orchestration Core**
 
-HALSTRAL is a private, owner-controlled operating layer for coordinating multiple independent businesses without turning those businesses into one monolith.
-
-## Core principle
+HALSTRAL is an owner-controlled control plane for governing multiple independent business workspaces without collapsing their data, credentials, or authority into a shared monolith.
 
 > One Owner. One Orchestration Core. Many Independent Businesses. Separate Workspaces.
 
-## Core loop
+## Phase 1 status
 
-**Coordinate → Delegate → Execute → Observe → Learn → Improve**
+The Phase 0 → Phase 1 core registry is implemented with:
 
-## What HALSTRAL is
+- workspace registration, inspection, metadata updates, suspension, and archival;
+- core/workspace-owned capability registration and disablement;
+- explicit `ALLOW`/`DENY` policies with centralized default-deny evaluation;
+- task and run registration with validated lifecycle transitions;
+- cross-workspace isolation and explicit authorization;
+- structured, append-only authorization and mutation audit events;
+- plaintext-secret rejection and scoped `secret://` references;
+- an authenticated Hono HTTP control plane backed by Cloudflare D1;
+- 19 automated domain, API, audit, isolation, and security tests.
 
-- A private orchestration and control layer.
-- A portfolio-level intelligence and execution system.
-- A boundary between the owner and independent business workspaces.
-- A place for shared capabilities, policies, observability, and controlled delegation.
+HALSTRAL Phase 1 does **not** execute external actions.
 
-## What HALSTRAL is not
+## Stack
 
-- Not a public SaaS product by default.
-- Not a replacement for individual business brands.
-- Not the business itself.
-- Not a generic AI chatbot or developer framework.
-- Not a shared data pool where every business automatically sees every other business.
+- TypeScript
+- Hono
+- Cloudflare Pages/Workers
+- Cloudflare D1 (SQLite)
+- Vite
+- Vitest
 
-## Business isolation
+See [`docs/08_IMPLEMENTATION_GUIDE.md`](./docs/08_IMPLEMENTATION_GUIDE.md) for the rationale and full operating guide.
 
-Each business receives its own workspace containing its agents, workflows, tools, data, credentials, and execution context. Cross-business access must be explicit, scoped, auditable, and policy-controlled.
+## Quick start
 
-## Initial portfolio model
-
-```text
-OWNER
-  ↓
-HALSTRAL
-  ├── Merovia Workspace
-  ├── SparkMind Workspace
-  ├── Future Business Workspace
-  └── Future Business Workspace
+```bash
+npm install
+cp .env.example .dev.vars
+# Add a strong CONTROL_PLANE_TOKEN to .dev.vars
+npm run db:migrate:local
+npx wrangler d1 execute halstral-production --local --file=./seed.sql
+npm run build
+pm2 start ecosystem.config.cjs
+curl http://localhost:3000/health
 ```
 
-## Repository status
+`.dev.vars`, `.env*`, build output, local D1 state, logs, and archives are excluded from Git.
 
-Foundation phase. Documentation and architecture are established before implementation.
+## Environment variables
 
-See [`docs/`](./docs/) for the formal system documents.
+- `CONTROL_PLANE_TOKEN` — required private API bearer token; provision as a Cloudflare Pages secret.
+- `OWNER_ID` — optional owner identifier, default `owner_halstral`.
+
+## API entry URIs
+
+- Public: `GET /`, `GET /health`
+- Workspaces: `/workspaces`, `/workspaces/:id`, `/workspaces/:id/suspend`, `/workspaces/:id/archive`
+- Capabilities: `/capabilities`, `/capabilities/:id`, `/capabilities/:id/disable`
+- Policies: `/policies`, `/policies/:id`
+- Tasks: `/tasks`, `/tasks/:id`, `/tasks/:id/cancel`
+- Runs: `/runs`, `/runs/:id`
+- Audit: `/events`, `/events/:id`
+
+Protected routes require `Authorization: Bearer <token>` and accept `X-Actor-Type`/`X-Actor-Id` for auditable owner-controlled delegation context.
+
+## Data architecture
+
+D1 tables: `users`, `workspaces`, `capabilities`, `policies`, `tasks`, `runs`, and `events`. Every business-specific resource has an explicit workspace relationship where applicable. Database constraints enforce statuses and ownership shape; triggers block event update/delete.
+
+Migration:
+
+```bash
+npm run db:migrate:local
+# Production after D1 binding is provisioned:
+npx wrangler d1 migrations apply halstral-production --remote
+```
+
+## Quality gate
+
+```bash
+npm run typecheck
+npm test
+npm run test:coverage
+npm run build
+npm audit
+```
+
+Acceptance evidence is maintained in [`docs/09_PHASE_1_ACCEPTANCE_EVIDENCE.md`](./docs/09_PHASE_1_ACCEPTANCE_EVIDENCE.md).
+
+## User guide
+
+1. Provision the control-plane token and owner ID.
+2. Create independent workspaces as the owner.
+3. Register capabilities with `CORE` or `WORKSPACE` ownership.
+4. Create explicit policies for delegated workspace actors; absence of a match is denied.
+5. Register tasks only in active workspaces and runs only where execution registration is permitted.
+6. Inspect `/events` as the owner for authorization and mutation history.
+
+## Deployment
+
+- Platform: Cloudflare Pages + D1
+- Production URL: pending first BYOK deployment
+- Repository: `https://github.com/Sparkmind-obp-off/Hastral`
+- Production status: build verified; deployment pending
+
+## Not implemented / known limitations
+
+- No autonomous connector, messaging, financial, browser, or remote-code execution.
+- No Phase 2 workflow execution engine.
+- Managed identity federation, rate limiting, pagination, and approval-reference workflows remain future hardening work.
+
+## Recommended next steps
+
+1. Operate and review the Phase 1 registry/audit boundary in a private environment.
+2. Add managed identity and key rotation before expanding operator access.
+3. Begin Phase 2 only through a separately reviewed connector and approval contract.
+
+See [`docs/`](./docs/) for the immutable system charter, architecture, security contract, specification, and acceptance gate.
